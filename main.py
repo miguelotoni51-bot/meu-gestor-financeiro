@@ -1,71 +1,77 @@
 import streamlit as st
+import google.generativeai as genai
+import pandas as pd
+import plotly.express as px
 
-def calcular_inss(salario_bruto):
-    # Tabela INSS 2024/2025
-    faixas = [(1412.00, 0.075), (2666.68, 0.09), (4000.03, 0.12), (7786.02, 0.14)]
-    inss = 0
-    teto = 7786.02
-    salario_base = min(salario_bruto, teto)
+# Configuração da IA (Pegando a chave de forma segura)
+try:
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+    model = genai.GenerativeModel('gemini-1.5-flash')
+except:
+    st.error("Configure sua API KEY do Google nos Secrets do Streamlit!")
+
+# --- FUNÇÕES DE CÁLCULO ---
+def calcular_impostos(bruto):
+    # INSS 2024/2025
+    if bruto <= 1412: inss = bruto * 0.075
+    elif bruto <= 2666.68: inss = (bruto * 0.09) - 21.18
+    elif bruto <= 4000.03: inss = (bruto * 0.12) - 101.18
+    else: inss = min((bruto * 0.14) - 181.18, 908.85) # Teto INSS
     
-    anterior = 0
-    for limite, taxa in faixas:
-        if salario_base > limite:
-            inss += (limite - anterior) * taxa
-            anterior = limite
-        else:
-            inss += (salario_base - anterior) * taxa
-            break
-    return inss
+    # IRRF
+    base_ir = bruto - inss
+    if base_ir <= 2259.20: irrf = 0
+    elif base_ir <= 2826.65: irrf = (base_ir * 0.075) - 169.44
+    elif base_ir <= 3751.05: irrf = (base_ir * 0.15) - 381.44
+    elif base_ir <= 4664.68: irrf = (base_ir * 0.225) - 662.77
+    else: irrf = (base_ir * 0.275) - 896.00
+    return round(inss, 2), round(irrf, 2)
 
-def calcular_irrf(salario_base_ir):
-    # Tabela IRRF (Com dedução simplificada inclusa na lógica)
-    if salario_base_ir <= 2259.20:
-        return 0
-    elif salario_base_ir <= 2826.65:
-        return (salario_base_ir * 0.075) - 169.44
-    elif salario_base_ir <= 3751.05:
-        return (salario_base_ir * 0.15) - 381.44
-    elif salario_base_ir <= 4664.68:
-        return (salario_base_ir * 0.225) - 662.77
-    else:
-        return (salario_base_ir * 0.275) - 896.00
+# --- INTERFACE ---
+st.set_page_config(page_title="IA Financeira", layout="wide")
+st.title("🤖 Consultor Financeiro com IA")
 
-# Interface do Usuário
-st.title("💰 Meu Gestor Financeiro Pessoal")
-st.sidebar.header("Configurações")
+with st.sidebar:
+    st.header("Dados Financeiros")
+    salario_bruto = st.number_input("Salário Bruto (R$)", value=5000.0)
+    banco = st.selectbox("Seu Banco de Investimento", 
+                        ["Nubank", "Inter", "PicPay", "Mercado Pago", "Itaú", "Bradesco", "Santander", "Banco do Brasil", "Caixa"])
+    aporte = st.number_input("Investimento Mensal (R$)", value=500.0)
+    meses = st.slider("Prazo (Meses)", 1, 60, 12)
 
-# 1. Entrada de Renda
-salario_bruto = st.sidebar.number_input("Salário Bruto (R$)", min_value=0.0, value=5000.0)
+# Processamento
+v_inss, v_irrf = calcular_impostos(salario_bruto)
+liquido = salario_bruto - v_inss - v_irrf
 
-# Cálculos de Impostos
-valor_inss = calcular_inss(salario_bruto)
-valor_irrf = calcular_irrf(salario_bruto - valor_inss)
-salario_liquido_real = salario_bruto - valor_inss - valor_irrf
+# Layout de Colunas
+c1, c2, c3 = st.columns(3)
+c1.metric("Líquido", f"R$ {liquido:.2f}")
+c2.metric("Impostos (Total)", f"R$ {v_inss + v_irrf:.2f}")
+c3.metric("Banco Escolhido", banco)
 
-# 2. Despesas
-st.subheader("📊 Gastos Mensais")
-gastos = st.text_area("Descreva suas despesas (Ex: Aluguel: 1200, Internet: 100)", "Aluguel: 0\nAlimentação: 0")
-total_despesas = st.number_input("Total das Despesas Fixas (R$)", min_value=0.0)
+# --- CHAMADA DA IA ---
+if st.button("Pedir Análise da IA"):
+    with st.spinner("A IA está analisando os impostos e o mercado..."):
+        prompt = f"""
+        Sou brasileiro, recebo R$ {salario_bruto} bruto. 
+        Meus impostos são: INSS R$ {v_inss} e IRRF R$ {v_irrf}.
+        Quero investir R$ {aporte} por mês no banco {banco} por {meses} meses.
+        Com base na economia brasileira atual (SELIC e CDI):
+        1. Analise se meu imposto está alto.
+        2. Faça uma projeção de quanto terei no {banco} ao final de {meses} meses (considere as taxas médias desse banco).
+        3. Dê uma dica curta de como economizar.
+        Seja direto e use emojis.
+        """
+        response = model.generate_content(prompt)
+        st.write("---")
+        st.subheader("💡 Parecer da Inteligência Artificial")
+        st.info(response.text)
 
-# 3. Investimentos
-st.subheader("📈 Planejamento de Investimentos")
-aporte_mensal = st.number_input("Quanto vai investir este mês? (R$)", min_value=0.0)
-taxa_juros = st.slider("Taxa de juros anual esperada (%)", 0.0, 20.0, 10.0)
-
-# Resumo Final
+# Gráfico simples
 st.divider()
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric("Salário Líquido", f"R$ {salario_liquido_real:.2f}")
-    st.caption(f"INSS: R$ {valor_inss:.2f} | IRRF: R$ {valor_irrf:.2f}")
-
-with col2:
-    sobra_caixa = salario_liquido_real - total_despesas - aporte_mensal
-    st.metric("Sobra no Caixa", f"R$ {sobra_caixa:.2f}")
-
-with col3:
-    st.metric("Total Investido", f"R$ {aporte_mensal:.2f}")
-
-if sobra_caixa < 0:
-    st.error("Atenção: Suas despesas e investimentos superam seu salário líquido!")
+df = pd.DataFrame({
+    "Categoria": ["Líquido", "INSS", "IRRF"],
+    "Valor": [liquido, v_inss, v_irrf]
+})
+fig = px.bar(df, x="Categoria", y="Valor", color="Categoria", title="Composição do Salário Bruto")
+st.plotly_chart(fig)
