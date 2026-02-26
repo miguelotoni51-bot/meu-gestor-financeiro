@@ -6,7 +6,7 @@ import plotly.express as px
 # Configuração da IA (Pegando a chave de forma segura)
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel('models/gemini-1.5-pro')
+    model = genai.GenerativeModel('gemini-1.5-pro')
 except:
     st.error("Configure sua API KEY do Google nos Secrets do Streamlit!")
 
