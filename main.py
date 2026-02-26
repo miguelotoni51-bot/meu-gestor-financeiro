@@ -4,7 +4,7 @@ import plotly.express as px
 
 # --- FUNÇÕES DE CÁLCULO ---
 def calcular_impostos(bruto):
-    # INSS 2024/2025 (Tabela Simplificada)
+    # INSS 2024/2025
     if bruto <= 1412: inss = bruto * 0.075
     elif bruto <= 2666.68: inss = (bruto * 0.09) - 21.18
     elif bruto <= 4000.03: inss = (bruto * 0.12) - 101.18
@@ -20,39 +20,46 @@ def calcular_impostos(bruto):
     return round(inss, 2), round(irrf, 2)
 
 def projetar_investimento(aporte, meses, banco):
-    # Taxas estimadas (CDI anual em ~11.25%)
+    # Taxas estimadas mensais
     taxas = {
         "Nubank": 0.009, "Inter": 0.009, "PicPay": 0.0092, 
         "Mercado Pago": 0.0092, "Itaú": 0.007, "Bradesco": 0.007, 
         "Santander": 0.007, "Banco do Brasil": 0.007, "Caixa": 0.005
     }
     taxa_mensal = taxas.get(banco, 0.007)
-    # Cálculo de Juros Compostos para aportes mensais
     total = aporte * (((1 + taxa_mensal)**meses - 1) / taxa_mensal)
     return round(total, 2)
 
 # --- INTERFACE ---
 st.set_page_config(page_title="Gestor Financeiro", layout="wide")
-st.title("💰 Gestor Financeiro & Projeção")
+st.title("💰 Gestor Financeiro: Salário & Investimento")
 
 with st.sidebar:
     st.header("Configurações")
     salario_bruto = st.number_input("Salário Bruto (R$)", value=5000.0, step=100.0)
     banco = st.selectbox("Seu Banco de Investimento", 
                         ["Nubank", "Inter", "PicPay", "Mercado Pago", "Itaú", "Bradesco", "Santander", "Banco do Brasil", "Caixa"])
-    aporte = st.number_input("Investimento Mensal (R$)", value=500.0, step=50.0)
-    meses = st.slider("Prazo (Meses)", 1, 60, 12)
+    aporte_mensal = st.number_input("Quanto vai investir por mês? (R$)", value=500.0, step=50.0)
+    meses = st.slider("Prazo do Investimento (Meses)", 1, 60, 12)
 
 # Processamento de cálculos
 v_inss, v_irrf = calcular_impostos(salario_bruto)
 liquido = salario_bruto - v_inss - v_irrf
-total_investido = projetar_investimento(aporte, meses, banco)
+# CÁLCULO DO DINHEIRO RESTANTE
+restante = liquido - aporte_mensal
+total_acumulado = projetar_investimento(aporte_mensal, meses, banco)
 
-# Exibição de Métricas
-c1, c2, c3 = st.columns(3)
+# Exibição de Métricas Principais
+c1, c2, c3, c4 = st.columns(4)
 c1.metric("Salário Líquido", f"R$ {liquido:.2f}")
 c2.metric("Total Impostos", f"R$ {v_inss + v_irrf:.2f}")
-c3.metric(f"Projeção no {banco}", f"R$ {total_investido:.2f}")
+c3.metric("Aporte Mensal", f"R$ {aporte_mensal:.2f}")
+
+# Métrica em destaque para o que sobra
+if restante >= 0:
+    c4.metric("Saldo Livre Restante", f"R$ {restante:.2f}", delta="Disponível")
+else:
+    c4.metric("Saldo Livre Restante", f"R$ {restante:.2f}", delta="Negativo", delta_color="inverse")
 
 st.divider()
 
@@ -60,20 +67,26 @@ st.divider()
 col_graf1, col_graf2 = st.columns(2)
 
 with col_graf1:
-    st.subheader("📊 Distribuição do Salário Bruto")
+    st.subheader("📊 Onde vai parar seu Salário Bruto?")
+    # O gráfico agora mostra o Saldo Livre separado do Investimento
     df_pizza = pd.DataFrame({
-        "Categoria": ["Líquido", "INSS", "IRRF"],
-        "Valor": [liquido, v_inss, v_irrf]
+        "Categoria": ["Saldo Livre", "Investimento", "INSS", "IRRF"],
+        "Valor": [max(0, restante), aporte_mensal, v_inss, v_irrf]
     })
-    fig_pizza = px.pie(df_pizza, values="Valor", names="Categoria", hole=0.4)
+    fig_pizza = px.pie(df_pizza, values="Valor", names="Categoria", 
+                 color_discrete_sequence=px.colors.qualitative.Set3, hole=0.4)
     st.plotly_chart(fig_pizza, use_container_width=True)
 
 with col_graf2:
-    st.subheader("📈 Crescimento do Investimento")
-    # Criar histórico de crescimento
-    historico = [projetar_investimento(aporte, m, banco) for m in range(1, meses + 1)]
+    st.subheader(f"📈 Projeção no {banco}")
+    historico = [projetar_investimento(aporte_mensal, m, banco) for m in range(1, meses + 1)]
     df_linha = pd.DataFrame({"Mês": list(range(1, meses + 1)), "Total Acumulado": historico})
-    fig_linha = px.line(df_linha, x="Mês", y="Total Acumulado", markers=True)
+    fig_linha = px.line(df_linha, x="Mês", y="Total Acumulado", markers=True, 
+                        title=f"Resultado Final: R$ {total_acumulado:.2f}")
     st.plotly_chart(fig_linha, use_container_width=True)
 
-st.success(f"Dica: Investindo no {banco}, você terá aproximadamente R$ {total_investido:.2f} após {meses} meses.")
+# Alerta de saúde financeira
+if restante < 0:
+    st.error(f"⚠️ Cuidado! Seu investimento de R$ {aporte_mensal:.2f} é maior que seu salário líquido. Você ficará com R$ {restante:.2f} de saldo.")
+else:
+    st.info(f"💡 Após investir e pagar impostos, você terá **R$ {restante:.2f}** para suas outras despesas mensais.")
