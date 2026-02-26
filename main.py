@@ -6,9 +6,10 @@ import plotly.express as px
 # Configuração da IA (Pegando a chave de forma segura)
 try:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+    # Mudamos para o gemini-1.5-flash que é mais estável para esse tipo de app
     model = genai.GenerativeModel('gemini-1.5-flash')
-except:
-    st.error("Configure sua API KEY do Google nos Secrets do Streamlit!")
+except Exception as e:
+    st.error(f"Erro na configuração da IA: {e}")
 
 # --- FUNÇÕES DE CÁLCULO ---
 def calcular_impostos(bruto):
