@@ -3,17 +3,19 @@ import pandas as pd
 import plotly.express as px
 from streamlit_gsheets import GSheetsConnection
 
-# --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Gestor com Nuvem", layout="wide")
+# --- CONFIGURAÇÃO DA PÁGINA ---
+st.set_page_config(page_title="Gestor Financeiro Nuvem", layout="wide")
 
-# Conectar ao Google Sheets
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- CONEXÃO COM GOOGLE SHEETS ---
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    # Lê os dados da planilha (cache de 2 segundos para atualizar rápido)
+    df_despesas = conn.read(ttl=2)
+except Exception as e:
+    st.error("Erro ao conectar com a planilha. Verifique o link nos Secrets.")
+    df_despesas = pd.DataFrame(columns=["nome", "valor"])
 
-# Função para ler dados da planilha
-def carregar_dados():
-    return conn.read(ttl="10m") # Atualiza a cada 10 minutos ou ao forçar
-
-# --- CÁLCULOS FINANCEIROS ---
+# --- FUNÇÕES DE CÁLCULO ---
 def calcular_impostos(bruto):
     if bruto <= 1412: inss = bruto * 0.075
     elif bruto <= 2666.68: inss = (bruto * 0.09) - 21.18
@@ -28,56 +30,78 @@ def calcular_impostos(bruto):
     else: irrf = (base_ir * 0.275) - 896.00
     return round(inss, 2), round(irrf, 2)
 
-# --- INTERFACE ---
-st.title("💰 Gestor com Salvamento em Nuvem")
+def projetar_investimento(aporte, meses, banco):
+    taxas = {
+        "Nubank": 0.009, "Inter": 0.009, "Sicoob": 0.0085, "PicPay": 0.0092, 
+        "Mercado Pago": 0.0092, "Itaú": 0.007, "Bradesco": 0.007, 
+        "Santander": 0.007, "Banco do Brasil": 0.007, "Caixa": 0.005
+    }
+    taxa_mensal = taxas.get(banco, 0.007)
+    acumulado = []
+    for m in range(1, meses + 1):
+        valor = aporte * (((1 + taxa_mensal)**m - 1) / taxa_mensal)
+        acumulado.append(round(valor, 2))
+    return acumulado
 
-# Carregar despesas salvas
-df_despesas = carregar_dados()
-
+# --- INTERFACE LATERAL ---
 with st.sidebar:
-    st.header("Renda e Fixo")
-    salario_bruto = st.number_input("Salário Bruto", value=5000.0)
-    moradia = st.number_input("Habitação", value=1200.0)
+    st.header("💰 Minha Renda")
+    salario_bruto = st.number_input("Salário Bruto (R$)", value=5000.0)
     
     st.divider()
-    st.header("📝 Adicionar Nova Despesa")
-    with st.form("form_gsheets"):
-        novo_nome = st.text_input("Nome da conta")
-        novo_valor = st.number_input("Valor R$", min_value=0.0)
-        if st.form_submit_button("Salvar na Nuvem"):
-            # Lógica para adicionar nova linha ao dataframe e atualizar planilha
-            nova_linha = pd.DataFrame([{"nome": novo_nome, "valor": novo_valor}])
-            updated_df = pd.concat([df_despesas, nova_linha], ignore_index=True)
-            conn.update(data=updated_df)
-            st.success("Salvo com sucesso!")
+    st.header("📝 Adicionar Despesa")
+    with st.form("nova_despesa", clear_on_submit=True):
+        nome_d = st.text_input("Ex: Netflix, Internet...")
+        valor_d = st.number_input("Valor (R$)", min_value=0.0)
+        enviar = st.form_submit_button("Salvar na Nuvem")
+        
+        if enviar and nome_d:
+            nova_linha = pd.DataFrame([{"nome": nome_d, "valor": valor_d}])
+            df_atualizado = pd.concat([df_despesas, nova_linha], ignore_index=True)
+            conn.update(data=df_atualizado)
+            st.success("Salvo!")
             st.rerun()
 
+    if st.button("🗑️ Limpar Tudo (Nuvem)"):
+        df_reset = pd.DataFrame(columns=["nome", "valor"])
+        conn.update(data=df_reset)
+        st.rerun()
+
     st.divider()
-    banco = st.selectbox("Banco", ["Sicoob", "Nubank", "Inter", "Itaú", "Bradesco"])
-    aporte_mensal = st.number_input("Aporte Mensal", value=500.0)
+    st.header("📈 Investimento")
+    banco = st.selectbox("Banco", ["Sicoob", "Nubank", "Inter", "PicPay", "Itaú"])
+    aporte = st.number_input("Aporte Mensal", value=500.0)
+    meses = st.slider("Meses", 1, 60, 12)
 
 # --- PROCESSAMENTO ---
 v_inss, v_irrf = calcular_impostos(salario_bruto)
 liquido = salario_bruto - v_inss - v_irrf
-total_extras = df_despesas['valor'].sum() if not df_despesas.empty else 0
-total_despesas = moradia + total_extras
-saldo_final = liquido - total_despesas - aporte_mensal
+total_extras = df_despesas["valor"].sum() if not df_despesas.empty else 0
+saldo_final = liquido - total_extras - aporte
+historico = projetar_investimento(aporte, meses, banco)
 
-# --- EXIBIÇÃO ---
-st.subheader("📌 Resumo")
-col1, col2, col3 = st.columns(3)
-col1.metric("Salário Líquido", f"R$ {liquido:.2f}")
-col2.metric("Despesas Totais", f"R$ {total_despesas:.2f}")
-col3.metric("Saldo Livre", f"R$ {saldo_final:.2f}")
+# --- VISUALIZAÇÃO ---
+st.title(f"📊 Gestor Financeiro - {banco}")
 
-if not df_despesas.empty:
-    with st.expander("Ver lista de despesas salvas"):
-        st.table(df_despesas)
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Salário Líquido", f"R$ {liquido:.2f}")
+c2.metric("Despesas Adicionais", f"R$ {total_extras:.2f}")
+c3.metric("Saldo Livre", f"R$ {saldo_final:.2f}")
+c4.metric("Total Acumulado", f"R$ {historico[-1]:.2f}")
 
 st.divider()
-# Gráfico de barras acumulativo
-st.subheader(f"📊 Acúmulo no {banco}")
-meses_range = list(range(1, 13))
-acumulado = [aporte_mensal * m for m in meses_range] # Simplificado para exemplo
-fig_col = px.bar(x=meses_range, y=acumulado, labels={'x':'Mês', 'y':'Total R$'})
-st.plotly_chart(fig_col, use_container_width=True)
+
+col_esq, col_dir = st.columns(2)
+
+with col_esq:
+    st.subheader("📋 Lista de Despesas (Nuvem)")
+    if not df_despesas.empty:
+        st.dataframe(df_despesas, use_container_width=True)
+    else:
+        st.info("Nenhuma despesa salva.")
+
+with col_dir:
+    st.subheader(f"📊 Evolução do Investimento ({banco})")
+    df_fig = pd.DataFrame({"Mês": list(range(1, meses+1)), "Valor": historico})
+    fig = px.bar(df_fig, x="Mês", y="Valor", color="Valor", color_continuous_scale="Greens")
+    st.plotly_chart(fig, use_container_width=True)
