@@ -1,19 +1,13 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from streamlit_gsheets import GSheetsConnection
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gestor Financeiro Nuvem", layout="wide")
+st.set_page_config(page_title="Gestor Financeiro", layout="wide")
 
-# --- CONEXÃO COM GOOGLE SHEETS ---
-try:
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    # Lê os dados da planilha (cache de 2 segundos para atualizar rápido)
-    df_despesas = conn.read(ttl=2)
-except Exception as e:
-    st.error("Erro ao conectar com a planilha. Verifique o link nos Secrets.")
-    df_despesas = pd.DataFrame(columns=["nome", "valor"])
+# --- INICIALIZAÇÃO DA MEMÓRIA TEMPORÁRIA ---
+if 'despesas_extras' not in st.session_state:
+    st.session_state.despesas_extras = []
 
 # --- FUNÇÕES DE CÁLCULO ---
 def calcular_impostos(bruto):
@@ -45,63 +39,63 @@ def projetar_investimento(aporte, meses, banco):
 
 # --- INTERFACE LATERAL ---
 with st.sidebar:
-    st.header("💰 Minha Renda")
+    st.header("💰 Renda")
     salario_bruto = st.number_input("Salário Bruto (R$)", value=5000.0)
     
     st.divider()
     st.header("📝 Adicionar Despesa")
     with st.form("nova_despesa", clear_on_submit=True):
-        nome_d = st.text_input("Ex: Netflix, Internet...")
+        nome_d = st.text_input("Nome da despesa (ex: Aluguel, Luz)")
         valor_d = st.number_input("Valor (R$)", min_value=0.0)
-        enviar = st.form_submit_button("Salvar na Nuvem")
+        adicionar = st.form_submit_button("Adicionar Tópico")
         
-        if enviar and nome_d:
-            nova_linha = pd.DataFrame([{"nome": nome_d, "valor": valor_d}])
-            df_atualizado = pd.concat([df_despesas, nova_linha], ignore_index=True)
-            conn.update(data=df_atualizado)
-            st.success("Salvo!")
+        if adicionar and nome_d:
+            st.session_state.despesas_extras.append({"nome": nome_d, "valor": valor_d})
             st.rerun()
 
-    if st.button("🗑️ Limpar Tudo (Nuvem)"):
-        df_reset = pd.DataFrame(columns=["nome", "valor"])
-        conn.update(data=df_reset)
+    if st.button("🗑️ Limpar Lista"):
+        st.session_state.despesas_extras = []
         st.rerun()
 
     st.divider()
     st.header("📈 Investimento")
-    banco = st.selectbox("Banco", ["Sicoob", "Nubank", "Inter", "PicPay", "Itaú"])
-    aporte = st.number_input("Aporte Mensal", value=500.0)
-    meses = st.slider("Meses", 1, 60, 12)
+    banco = st.selectbox("Banco", ["Sicoob", "Nubank", "Inter", "PicPay", "Itaú", "Bradesco"])
+    aporte_mensal = st.number_input("Aporte Mensal", value=500.0)
+    meses_invest = st.slider("Meses", 1, 60, 12)
 
 # --- PROCESSAMENTO ---
 v_inss, v_irrf = calcular_impostos(salario_bruto)
 liquido = salario_bruto - v_inss - v_irrf
-total_extras = df_despesas["valor"].sum() if not df_despesas.empty else 0
-saldo_final = liquido - total_extras - aporte
-historico = projetar_investimento(aporte, meses, banco)
+total_extras = sum(item['valor'] for item in st.session_state.despesas_extras)
+saldo_final = liquido - total_extras - aporte_mensal
+historico_inv = projetar_investimento(aporte_mensal, meses_invest, banco)
 
-# --- VISUALIZAÇÃO ---
-st.title(f"📊 Gestor Financeiro - {banco}")
+# --- EXIBIÇÃO PRINCIPAL ---
+st.title(f"📊 Gestor Financeiro Pessoal")
 
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Salário Líquido", f"R$ {liquido:.2f}")
-c2.metric("Despesas Adicionais", f"R$ {total_extras:.2f}")
+c2.metric("Total de Gastos", f"R$ {total_extras:.2f}")
 c3.metric("Saldo Livre", f"R$ {saldo_final:.2f}")
-c4.metric("Total Acumulado", f"R$ {historico[-1]:.2f}")
+c4.metric("Total Acumulado", f"R$ {historico_inv[-1]:.2f}")
 
 st.divider()
 
-col_esq, col_dir = st.columns(2)
+col_lista, col_graf = st.columns(2)
 
-with col_esq:
-    st.subheader("📋 Lista de Despesas (Nuvem)")
-    if not df_despesas.empty:
-        st.dataframe(df_despesas, use_container_width=True)
+with col_lista:
+    st.subheader("📋 Seus Tópicos de Despesas")
+    if st.session_state.despesas_extras:
+        df_view = pd.DataFrame(st.session_state.despesas_extras)
+        st.table(df_view)
     else:
-        st.info("Nenhuma despesa salva.")
+        st.info("Adicione despesas na barra lateral para começar.")
 
-with col_dir:
-    st.subheader(f"📊 Evolução do Investimento ({banco})")
-    df_fig = pd.DataFrame({"Mês": list(range(1, meses+1)), "Valor": historico})
-    fig = px.bar(df_fig, x="Mês", y="Valor", color="Valor", color_continuous_scale="Greens")
+with col_graf:
+    st.subheader(f"📊 Projeção de Acúmulo: {banco}")
+    df_fig = pd.DataFrame({
+        "Mês": list(range(1, meses_invest + 1)),
+        "Valor Acumulado": historico_inv
+    })
+    fig = px.bar(df_fig, x="Mês", y="Valor Acumulado", color="Valor Acumulado", color_continuous_scale="Blues")
     st.plotly_chart(fig, use_container_width=True)
