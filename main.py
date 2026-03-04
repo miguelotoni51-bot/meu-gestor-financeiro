@@ -3,9 +3,9 @@ import pandas as pd
 import plotly.express as px
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Gestor Financeiro", layout="wide")
+st.set_page_config(page_title="Gestor Financeiro Inteligente", layout="wide")
 
-# --- INICIALIZAÇÃO DA MEMÓRIA TEMPORÁRIA ---
+# --- INICIALIZAÇÃO DA MEMÓRIA ---
 if 'despesas_extras' not in st.session_state:
     st.session_state.despesas_extras = []
 
@@ -40,62 +40,94 @@ def projetar_investimento(aporte, meses, banco):
 # --- INTERFACE LATERAL ---
 with st.sidebar:
     st.header("💰 Renda")
-    salario_bruto = st.number_input("Salário Bruto (R$)", value=5000.0)
+    salario_bruto = st.number_input("Salário Bruto (R$)", value=5000.0, step=100.0)
     
     st.divider()
-    st.header("📝 Adicionar Despesa")
+    st.header("📝 Categorizar Despesa")
     with st.form("nova_despesa", clear_on_submit=True):
-        nome_d = st.text_input("Nome da despesa (ex: Aluguel, Luz)")
+        categoria = st.selectbox("Categoria", ["🏠 Habitação", "🍎 Alimentação", "🚗 Transporte", "🎭 Lazer", "💊 Saúde", "🛠️ Outros"])
+        nome_d = st.text_input("Descrição (ex: Aluguel, Ifood)")
         valor_d = st.number_input("Valor (R$)", min_value=0.0)
-        adicionar = st.form_submit_button("Adicionar Tópico")
+        adicionar = st.form_submit_button("Adicionar Despesa")
         
         if adicionar and nome_d:
-            st.session_state.despesas_extras.append({"nome": nome_d, "valor": valor_d})
+            st.session_state.despesas_extras.append({"categoria": categoria, "nome": nome_d, "valor": valor_d})
             st.rerun()
 
-    if st.button("🗑️ Limpar Lista"):
+    if st.button("🗑️ Limpar Tudo"):
         st.session_state.despesas_extras = []
         st.rerun()
 
     st.divider()
-    st.header("📈 Investimento")
-    banco = st.selectbox("Banco", ["Sicoob", "Nubank", "Inter", "PicPay", "Itaú", "Bradesco"])
-    aporte_mensal = st.number_input("Aporte Mensal", value=500.0)
-    meses_invest = st.slider("Meses", 1, 60, 12)
+    st.header("📈 Plano de Investimento")
+    banco = st.selectbox("Banco para Projeção", ["Sicoob", "Nubank", "Inter", "PicPay", "Itaú"])
+    aporte_mensal = st.number_input("Quanto investir/mês", value=500.0)
+    meses_invest = st.slider("Prazo em Meses", 1, 60, 12)
 
-# --- PROCESSAMENTO ---
+# --- PROCESSAMENTO DE DADOS ---
 v_inss, v_irrf = calcular_impostos(salario_bruto)
 liquido = salario_bruto - v_inss - v_irrf
-total_extras = sum(item['valor'] for item in st.session_state.despesas_extras)
-saldo_final = liquido - total_extras - aporte_mensal
+total_despesas = sum(item['valor'] for item in st.session_state.despesas_extras)
+saldo_final = liquido - total_despesas - aporte_mensal
 historico_inv = projetar_investimento(aporte_mensal, meses_invest, banco)
 
 # --- EXIBIÇÃO PRINCIPAL ---
-st.title(f"📊 Gestor Financeiro Pessoal")
+st.title("🤖 Seu Consultor Financeiro Particular")
 
+# Métricas de topo
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("Salário Líquido", f"R$ {liquido:.2f}")
-c2.metric("Total de Gastos", f"R$ {total_extras:.2f}")
+c1.metric("Renda Líquida", f"R$ {liquido:.2f}")
+c2.metric("Gastos Cadastrados", f"R$ {total_despesas:.2f}")
 c3.metric("Saldo Livre", f"R$ {saldo_final:.2f}")
-c4.metric("Total Acumulado", f"R$ {historico_inv[-1]:.2f}")
+c4.metric("Patrimônio Futuro", f"R$ {historico_inv[-1]:.2f}")
 
 st.divider()
 
-col_lista, col_graf = st.columns(2)
+# --- DIAGNÓSTICO DE SAÚDE FINANCEIRA ---
+st.subheader("💡 Diagnóstico de Saúde Financeira")
+if liquido > 0:
+    perc_gastos = (total_despesas / liquido) * 100
+    if saldo_final < 0:
+        st.error(f"🚨 **ALERTA:** Você está gastando mais do que recebe! Seu déficit é de R$ {abs(saldo_final):.2f}. Reveja seus gastos de 'Lazer' ou 'Outros'.")
+    elif perc_gastos > 70:
+        st.warning(f"⚠️ **CUIDADO:** Seus gastos fixos/variáveis ocupam {perc_gastos:.1f}% da sua renda. O ideal é que fiquem abaixo de 50% para sobrar para investimentos.")
+    elif aporte_mensal > 0:
+        st.success(f"✅ **PARABÉNS:** Você está destinando {(aporte_mensal/liquido)*100:.1f}% para o futuro. Sua gestão está sólida!")
+else:
+    st.info("Insira seu salário bruto para ver o diagnóstico.")
 
-with col_lista:
-    st.subheader("📋 Seus Tópicos de Despesas")
+st.divider()
+
+# --- GRÁFICOS E TABELAS ---
+col_esq, col_dir = st.columns(2)
+
+with col_esq:
+    st.subheader("📊 Onde está seu dinheiro?")
     if st.session_state.despesas_extras:
-        df_view = pd.DataFrame(st.session_state.despesas_extras)
-        st.table(df_view)
+        df_pizza = pd.DataFrame(st.session_state.despesas_extras)
+        # Agrupar por categoria para o gráfico
+        df_grouped = df_pizza.groupby("categoria")["valor"].sum().reset_index()
+        fig_pizza = px.pie(df_grouped, values="valor", names="categoria", hole=0.4, 
+                           color_discrete_sequence=px.colors.qualitative.Pastel)
+        st.plotly_chart(fig_pizza, use_container_width=True)
     else:
-        st.info("Adicione despesas na barra lateral para começar.")
+        st.info("Adicione despesas na lateral para ver a distribuição.")
 
-with col_graf:
-    st.subheader(f"📊 Projeção de Acúmulo: {banco}")
+with col_dir:
+    st.subheader(f"📈 Acúmulo no {banco}")
     df_fig = pd.DataFrame({
         "Mês": list(range(1, meses_invest + 1)),
         "Valor Acumulado": historico_inv
     })
-    fig = px.bar(df_fig, x="Mês", y="Valor Acumulado", color="Valor Acumulado", color_continuous_scale="Blues")
-    st.plotly_chart(fig, use_container_width=True)
+    fig_col = px.bar(df_fig, x="Mês", y="Valor Acumulado", color="Valor Acumulado", color_continuous_scale="Viridis")
+    st.plotly_chart(fig_col, use_container_width=True)
+
+
+
+[Image of 50-30-20 rule pie chart]
+
+
+# Tabela detalhada no final
+if st.session_state.despesas_extras:
+    with st.expander("📄 Detalhamento das Despesas"):
+        st.table(pd.DataFrame(st.session_state.despesas_extras))
