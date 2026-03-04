@@ -124,7 +124,6 @@ with col_dir:
 
 
 
-[Image of 50-30-20 rule pie chart]
 
 
 # Tabela detalhada no final
